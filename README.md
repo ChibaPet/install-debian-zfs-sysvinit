@@ -39,3 +39,9 @@ wouldn't want to.
 
 Oh, FWIW, this is intended to run off from the Debian standard live media.
 It's historically also run from Ubuntu live images. It can cross-install.
+
+Note that my funny try/catch trick is generally useful and I need to use it
+everywhere. Note also that I need to make this way more granular, with each
+option having its own checkpoint. I lump some things together now that
+should be distinct. But I want to get this out rather than just shoving the
+version de jeur into pastebins every few months for years now.
