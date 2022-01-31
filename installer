@@ -1,0 +1,723 @@
+#!/bin/sh
+
+# ***************************************************************************
+# NO COPYRIGHT.
+#
+# The person who associated a work with this deed has dedicated the work
+# to the public domain by waiving all of his or her rights to the work
+# worldwide under copyright law, including all related and neighboring
+# rights, to the extent allowed by law.
+#
+# You can copy, modify, distribute and perform the work, even for
+# commercial purposes, all without asking permission.
+#
+# See https://creativecommons.org/publicdomain/zero/1.0/ for additional
+# information.
+# ***************************************************************************
+
+# ***************************************************************************
+# Only set this when you're happy with all the variables.
+
+#     >>> Running with this set to '1' is a destructive operation. <<<
+
+CONFIGURED=0
+# ***************************************************************************
+
+# ***************************************************************************
+# User and system names.
+USER="me"           # Initial non-root user XXX make, chown
+HOST="mybox"        # hostname
+DOMAIN="my.domain"  # The remaining bits of FQDN to follow hostname
+POOL="tank"         # ZFS pool name
+# ***************************************************************************
+
+# ***************************************************************************
+# General, distribution-agnostic variables.
+# XXX GUI=0
+LEGACY=1            # Are we using legacy ZFS mountpoints, or inherited?
+LAPTOP=1            # XXX Currently just install pm-utils - expand.
+UEFI=1              # Will this use UEFI? If not, we assume legacy.
+UEFIGRUB=1          # Use GRUB with UEFI? If not, put kernel and initrd in ESP.
+NA=                 # NVME DA partition designator
+NB=                 # NVME DB partition designator
+#NA=p               # "
+#NB=p               # "
+SWAPSIZE=8192       # Size of swap in megabytes
+MIRROR=1            # Are we installing to a RAID or mirror?
+NATIVECRYPT=0       # Are we using native encryption? If not, we assume LUKS.
+# ***************************************************************************
+
+# ***************************************************************************
+# Block devices
+DA=/dev/sda         # First drive.
+DB=/dev/sdb         # Second drive, used if we're setting up a mirror.
+DM0=/dev/md0        # Mirror for /boot if we're using two disks.
+DM1=/dev/md1        # Mirror for swap if we're using two disks.
+# ***************************************************************************
+
+# ***************************************************************************
+# GPT labels
+EFI0=efi0           # ESP for first disk.
+EFI1=efi1           # ESP for second disk.
+BIOSBOOT0=grub0     # biosboot for first disk.
+BIOSBOOT1=grub1     # biosboot for second disk.
+BOOT0=boot0         # /boot or RAID component for /boot on first disk.
+BOOT1=boot1         # RAID component for /boot on second disk.
+SWAP0=swap0         # Swap or RAID component for swap on first disk.
+SWAP1=swap1         # RAID component for swap on second disk.
+ROOT0=root0         # Main pool or mirror component on first disk.
+ROOT1=root1         # Mirror component for main pool on second disk.
+# ***************************************************************************
+
+
+# ***************************************************************************
+# Debian GNU/Linux
+# ***************************************************************************
+RELEASE="bullseye"
+REPOSITORY="http://deb.debian.org/debian"
+SETS="main contrib non-free"
+SECURITY_REPOSITORY="http://security.debian.org/debian-security"
+ZFS_REPOSITORY="http://repo.my.domain/debian"
+ZFS_REPOSITORY_SETS="main"
+ZFS_REPOSITORY_KEY="http://repo.my.domain/my-domain.asc"
+ZFS_METAPACKAGE="bliss-zfs"
+CACHE="http://cache.my.domain:3142"
+# ***************************************************************************
+
+# ***************************************************************************
+# Nothing below here should normally need to be modified.
+# ***************************************************************************
+main()
+{
+    if [ ${CONFIGURED} -ne 1 ]; then
+        echo "Please carefully examine and set configuration" \
+            "variables before proceeding."
+        exit 1
+    fi
+
+    export http_proxy="${CACHE}";
+
+    # Remnants of when this also covered Devuan and Ubuntu persist. You can
+    # support those with relative ease.
+    if [ -z "${RELEASE}" ]; then
+	echo "RELEASE is required."
+	exit 1
+    fi
+    if [ -z "${REPOSITORY}" ]; then
+	echo "REPOSITORY is required."
+	exit 1
+    fi
+    if [ -z "${SETS}" ]; then
+	echo "SETS is required."
+	exit 1
+    fi
+    if [ -z "${SECURITY_REPOSITORY}" ]; then
+	echo "SECURITY_REPOSITORY is required."
+	exit 1
+    fi
+
+    if [ -z "${ZFS_REPOSITORY}" ]; then
+        echo "Debian requires ZFS_REPOSITORY."
+        exit 1
+    fi
+    if [ -z "${ZFS_REPOSITORY_SETS}" ]; then
+        echo "Debian requires ZFS_REPOSITORY_SETS."
+        exit 1
+    fi
+    if [ -z "${ZFS_REPOSITORY_KEY}" ]; then
+        echo "Debian requires ZFS_REPOSITORY_KEY."
+        exit 1
+    fi
+    if [ -z "${ZFS_METAPACKAGE}" ]; then
+        echo "Debian requires ZFS_METAPACKAGE."
+        exit 1
+    fi
+
+
+    # If we're invoked as the thing inside the chroot...
+    if [ "X${1}" = "Xchroot" ]; then
+        do_chrooted
+        exit
+    fi
+
+    # Otherwise, iterate through the steps.
+    for foo in do_prereqs do_partition do_efi_and_boot_and_swap do_luks \
+        do_zfs do_debootstrap do_configs do_populate_sources \
+        do_bind_mounts do_prep_and_run_chroot do_efibootmgr
+    do
+        read -p "Run ${foo}? (y/N) " RESPONSE
+        if [ "X${RESPONSE}" = "X" ]; then
+            RESPONSE="N"
+        fi
+        if [ "${RESPONSE}" = "Y" -o "${RESPONSE}" = "y" ]; then
+            ${foo}
+        fi
+    done
+}
+
+newtry()
+{
+    ERRORS=0
+}
+
+try()
+{
+    "${@}"
+    ERRORS=$((${ERRORS} + ${?}))
+}
+
+catch()
+{
+    if [ ${ERRORS} -gt 0 ]; then
+        echo "Error: ${1}"
+        exit 1
+    fi
+}
+
+###########################################################################
+# Install environment prerequisites.
+###########################################################################
+do_prereqs()
+{
+    newtry
+echo > /etc/apt/apt.conf.d/02proxy <<END
+Acquire::http::Proxy "${CACHE}";
+END
+    try apt update
+    try apt install --yes gdisk cryptsetup cryptsetup-initramfs
+    try apt install --yes debootstrap rsync mdadm parted
+    if [ ${UEFI} -eq 1 ]; then
+        try apt install --yes efibootmgr dosfstools
+    fi
+
+    echo "deb ${ZFS_REPOSITORY} ${RELEASE} ${ZFS_REPOSITORY_SETS}" \
+      > /etc/apt/sources.list.d/local-zfs.list
+    mkdir -p /etc/apt/trusted.gpg.d
+    wget -O /etc/apt/trusted.gpg.d/local-zfs.asc ${ZFS_REPOSITORY_KEY}
+    apt update
+    apt install --yes kmod-zfs-$(uname -r) ${ZFS_METAPACKAGE}
+    modprobe zfs
+    catch "apt install failed"
+}
+
+###########################################################################
+# 
+###########################################################################
+do_partition()
+{
+    #
+    # Partitioning.
+    #
+    disks="${DA}"
+    if [ ${MIRROR} -eq 1 ]; then
+        disks="${disks} ${DB}"
+    fi
+    for disk in ${disks} ; do
+        sgdisk --zap-all ${disk}
+        sgdisk --clear ${disk}
+        # BIOSBOOT
+        sgdisk -n 1:$(sgdisk -F ${disk}):+128K -t 1:ef02 ${disk}
+        # ESP
+        sgdisk -n 2:$(sgdisk -F ${disk}):+200M -t 2:ef00 ${disk}
+        # /boot
+        sgdisk -n 3:$(sgdisk -F ${disk}):+512M -t 3:8300 ${disk}
+        # swap
+        sgdisk -n 4:$(sgdisk -F ${disk}):+${SWAPSIZE}M -t 4:8200 ${disk}
+    done
+
+    # Handle disparate sizing.
+    if [ $MIRROR -eq 1 ]; then
+        ALEFT=$(sgdisk -E ${DA})
+        BLEFT=$(sgdisk -E ${DB})
+        if [ ${ALEFT} -gt ${BLEFT} ]; then
+            REMAINS=${BLEFT}
+        else
+            REMAINS=${ALEFT}
+        fi
+    else
+        REMAINS=$(sgdisk -E ${DA})
+    fi
+
+    for disk in ${disks} ; do
+        # main pool
+        sgdisk -n 5:$(sgdisk -F ${disk}):${REMAINS} -t 5:8300 ${disk}
+    done
+
+    if [ $MIRROR -eq 1 ]; then
+        try sgdisk --change-name=2:${EFI1} \
+            --change-name=3:${BOOT1} \
+            --change-name=4:${SWAP1} \
+            --change-name=5:${ROOT1} ${DB}
+    fi
+    sgdisk --change-name=2:${EFI0} \
+        --change-name=3:${BOOT0} \
+        --change-name=4:${SWAP0} \
+        --change-name=5:${ROOT0} ${DA}
+}
+
+###########################################################################
+# 
+###########################################################################
+do_efi_and_boot_and_swap()
+{
+    #
+    # Create / format EFI System Partition(s).
+    #
+    if [ ${UEFI} -eq 1 ]; then
+        newtry
+        if [ ${MIRROR} -eq 1 ]; then
+            try mkdosfs -F 32 -n EFI /dev/disk/by-partlabel/${EFI1}
+        fi
+        try mkdosfs -F 32 -n EFI /dev/disk/by-partlabel/${EFI0}
+        catch "esp set-up failed"
+    fi
+
+    #
+    # Create / format boot partition.
+    #
+    newtry
+    if [ $MIRROR -eq 1 ]; then
+        try mdadm --create -n 2 -l 1 ${DM0} /dev/disk/by-partlabel/${BOOT0} \
+            /dev/disk/by-partlabel/${BOOT1}
+        try mkfs.ext4 ${DM0}
+    else
+        try mkfs.ext4 /dev/disk/by-partlabel/${BOOT0}
+    fi
+    catch "boot set-up failed"
+
+    #
+    # Create / format swap partition.
+    #
+    newtry
+    if [ $MIRROR -eq 1 ]; then
+        try mdadm --create -n 2 -l 1 ${DM1} ${DA}${NA}4 ${DB}${NB}4
+    fi
+    catch "boot set-up failed"
+}
+
+###########################################################################
+# 
+###########################################################################
+do_luks()
+{
+    #
+    # Set up LUKS root.
+    #
+    newtry
+    if [ ${NATIVECRYPT} -eq 0 ]; then
+        try cryptsetup luksFormat /dev/disk/by-partlabel/${ROOT0}
+        try cryptsetup luksOpen /dev/disk/by-partlabel/${ROOT0} luks${ROOT0}
+        if [ ${MIRROR} -eq 1 ]; then
+            try cryptsetup luksFormat /dev/disk/by-partlabel/${ROOT1}
+            try cryptsetup luksOpen /dev/disk/by-partlabel/${ROOT1} luks${ROOT1}
+        fi
+    fi
+    catch "cryptsetup failed"
+}
+
+###########################################################################
+# 
+###########################################################################
+do_zfs()
+{
+    newtry
+    if [ ${NATIVECRYPT} -eq 1 ]; then
+        target="/dev/disk/by-partlabel/${ROOT0}"
+        if [ ${MIRROR} -eq 1 ]; then
+            target="mirror ${target} /dev/disk/by-partlabel/${ROOT1}"
+        fi
+        try zpool create -o ashift=12 -O canmount=off -O compression=lz4 \
+            -O xattr=sa -O acltype=posixacl -O encryption=on \
+            -O keyformat=passphrase -R /mnt ${POOL} ${target}
+    else
+        target="/dev/mapper/luks${ROOT0}"
+        if [ ${MIRROR} -eq 1 ]; then
+            target="mirror ${target} /dev/mapper/luks${ROOT1}"
+        fi
+        try zpool create -o ashift=12 -O canmount=off -O compression=lz4 \
+            -O xattr=sa -O acltype=posixacl -R /mnt ${POOL} ${target}
+    fi
+    catch "zpool create failed"
+
+    #
+    # Create filesystems.
+    # 
+    if [ ${LEGACY} -eq 0 ]; then
+        zfs set mountpoint=/ ${POOL}
+    else
+        zfs set mountpoint=none ${POOL}
+    fi
+
+    newtry
+    if [ ${LEGACY} -eq 0 ]; then
+        try zfs create -o canmount=off ${POOL}/ROOT
+        try zfs create -o mountpoint=/ ${POOL}/ROOT/default
+        try zfs create ${POOL}/home
+        try zfs create ${POOL}/home/${USER}
+        try zfs create -o canmount=off ${POOL}/usr
+        try zfs create ${POOL}/usr/src
+        try zfs create -o canmount=off ${POOL}/var
+        try zfs create ${POOL}/var/mail
+    else
+        try zfs create -o canmount=off ${POOL}/ROOT
+        try zfs create -o mountpoint=legacy ${POOL}/ROOT/default
+        try zfs create -o mountpoint=legacy ${POOL}/home
+        try zfs create -o mountpoint=legacy ${POOL}/home/${USER}
+        try zfs create -o mountpoint=none ${POOL}/usr
+        try zfs create -o mountpoint=legacy ${POOL}/usr/src
+        try zfs create -o mountpoint=none ${POOL}/var
+        try zfs create -o mountpoint=legacy ${POOL}/var/mail
+    fi
+
+    try zfs create -o mountpoint=legacy ${POOL}/var/log
+    try zfs create -o mountpoint=legacy ${POOL}/tmp
+    catch "zfs create failed"
+
+    if [ ${LEGACY} -eq 1 ]; then
+        mount -t zfs ${POOL}/ROOT/default /mnt
+
+        mkdir -p /mnt/home
+        mount -t zfs ${POOL}/home /mnt/home
+
+        mkdir -p /mnt/home/${USER}
+        mount -t zfs ${POOL}/home/${USER} /mnt/home/${USER}
+
+        mkdir -p /mnt/usr/src
+        mount -t zfs ${POOL}/usr/src /mnt/usr/src
+
+        mkdir -p /mnt/var/mail
+        mount -t zfs ${POOL}/var/mail /mnt/var/mail
+    fi
+
+    mkdir -p /mnt/var/log
+    mount -t zfs ${POOL}/var/log /mnt/var/log
+
+    mkdir -p /mnt/tmp
+    mount -t zfs ${POOL}/tmp /mnt/tmp
+
+    chmod 1777 /mnt/tmp
+    mkdir -p /mnt/var/tmp
+    chmod 1777 /mnt/var/tmp
+
+    newtry
+    try mkdir /mnt/boot
+    try mount ${DM0} /mnt/boot
+    catch "Couldn't mount /boot"
+
+    if [ ${UEFI} -eq 1 ]; then
+        newtry
+        try mkdir /mnt/boot/${EFI0}
+        try mount /dev/disk/by-partlabel/${EFI0} /mnt/boot/${EFI0}
+        if [ ${MIRROR} -eq 1 ]; then
+            try mkdir /mnt/boot/${EFI1}
+            try mount /dev/disk/by-partlabel/${EFI1} /mnt/boot/${EFI1}
+        fi
+        catch "Couldn't mount the ESP(s)"
+    fi
+}
+
+###########################################################################
+# 
+###########################################################################
+do_debootstrap()
+{
+    #
+    # Free software is about choice!
+    #
+    mkdir -p /mnt/etc/apt/preferences.d
+    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
+Package: systemd
+Pin: release *
+Pin-Priority: -1
+
+Package: systemd-sysv
+Pin: release *
+Pin-Priority: -1
+
+Package: libnss-systemd
+Pin: release *
+Pin-Priority: -1
+END
+
+    #
+    # Bootstrap.
+    #
+    newtry
+    try debootstrap --no-merged-usr --arch=amd64 \
+        --include=sysvinit-core --variant=minbase \
+        --exclude=systemd,systemd-sysv,libnss-systemd ${RELEASE} /mnt
+    catch "debootstrap failed"
+}
+
+###########################################################################
+# 
+###########################################################################
+do_configs()
+{
+    #
+    # Legacy ZFS mounts if that's our chosen option.
+    #
+    if [ ${LEGACY} -eq 1 ]; then
+        cat <<END > /mnt/etc/fstab
+${POOL}/ROOT/default / zfs defaults 0 0
+${POOL}/home /home zfs defaults 0 0
+${POOL}/usr/src /usr/src zfs defaults 0 0
+${POOL}/var/mail /var/mail zfs defaults 0 0
+${POOL}/home/${USER} /home/${USER} zfs defaults 0 0
+END
+    fi
+
+    #
+    # Necessary legacy ZFS mounts - without this, these are populated before
+    # being mounted. This is a race condition that ought to be fixed in the
+    # zfs-initramfs scripts.
+    #
+    echo "${POOL}/var/log /var/log zfs defaults 0 0" >> /mnt/etc/fstab
+    echo "${POOL}/tmp /tmp zfs defaults 0 0" >> /mnt/etc/fstab
+
+    #
+    # /boot
+    #
+    if [ ${MIRROR} -eq 1 ]; then
+        echo "${DM0} /boot ext4 defaults 0 1" >> /mnt/etc/fstab
+    else
+        echo "${DA}${NA}3 /boot ext4 defaults 0 1" >> /mnt/etc/fstab
+    fi
+
+    #
+    # Add EFI System Partition to fstab.
+    #
+    if [ ${UEFI} -eq 1 ]; then
+        echo "${DA}${NA}2 /boot/${EFI0} vfat defaults 0 1" >> /mnt/etc/fstab
+        if [ ${MIRROR} -eq 1 ]; then
+            echo "${DB}${NB}2 /boot/${EFI1} vfat defaults 0 1" >> /mnt/etc/fstab
+        fi
+    fi
+
+    #
+    # Set up simple initial hosts file.
+    #
+    echo ${HOST} > /mnt/etc/hostname
+    cat >> /mnt/etc/hosts <<END
+    127.0.1.1	${HOST}.${DOMAIN} ${HOST}
+END
+
+    #
+    # Populate crypttab.
+    #
+    if [ ${NATIVECRYPT} -eq 0 ]; then
+        if [ ${MIRROR} -eq 1 ]; then
+            uuid0=$(blkid -t PARTLABEL=${ROOT0} | awk '{print $2}' \
+                | sed -e 's/"//g')
+            uuid1=$(blkid -t PARTLABEL=${ROOT1} | awk '{print $2}' \
+                | sed -e 's/"//g')
+            echo "luks${ROOT0} ${uuid0} none luks,initramfs" > /mnt/etc/crypttab
+            echo "luks${ROOT1} ${uuid1} none luks,initramfs" >> /mnt/etc/crypttab
+            # XXX Fix ugly line wrap
+            echo "swap ${DM1} /dev/urandom swap,cipher=aes-xts-plain64,size=256" >> /mnt/etc/crypttab
+        else
+            root=$(blkid -t PARTLABEL=${ROOT0} | awk '{print $2}' \
+                | sed -e 's/"//g')
+            swap=$(blkid -t PARTLABEL=${SWAP0} | awk '{print $2}' \
+                | sed -e 's/"//g')
+            echo "luks${ROOT0} ${root} none luks,initramfs" > /mnt/etc/crypttab
+            # XXX Fix ugly line wrap
+            echo "swap ${swap} /dev/urandom swap,cipher=aes-xts-plain64,size=256" >> /mnt/etc/crypttab
+        fi
+    fi
+
+    #
+    # Set a default locale.
+    #
+    # XXX let the user set this, above
+    echo 'LANG="en_US.UTF-8"' > /mnt/etc/default/locale
+}
+
+###########################################################################
+# 
+###########################################################################
+do_populate_sources()
+{
+    #
+    # Populate sources.list.
+    #
+
+    if [ ${ZFS_REPOSITORY} != 'none' ]; then
+        echo "deb ${ZFS_REPOSITORY} ${RELEASE} ${ZFS_REPOSITORY_SETS}" \
+          > /etc/apt/sources.list.d/local-zfs.list
+        mkdir -p /etc/apt/trusted.gpg.d
+        wget -O /etc/apt/trusted.gpg.d/local-zfs.asc ${ZFS_REPOSITORY_KEY}
+        apt update
+        apt install --yes kmod-zfs-$(uname -r) ${ZFS_METAPACKAGE}
+    else
+        apt install --yes ${ZFS_METAPACKAGE}
+    fi
+
+    if [ ${ZFS_REPOSITORY} != 'none' ]; then
+        echo "deb ${ZFS_REPOSITORY} ${RELEASE} ${ZFS_REPOSITORY_SETS}" \
+          > /mnt/etc/apt/sources.list
+        mkdir -p /mnt/etc/apt/trusted.gpg.d
+        wget -O /mnt/etc/apt/trusted.gpg.d/local-zfs.asc ${ZFS_REPOSITORY_KEY}
+    fi
+    echo "deb ${REPOSITORY} ${RELEASE} ${SETS}" \
+        >> /mnt/etc/apt/sources.list
+    echo "deb ${REPOSITORY} ${RELEASE}-updates ${SETS}" \
+        >> /mnt/etc/apt/sources.list
+    if [ -n "${SECURITY_REPOSITORY}" ]; then
+        echo "deb ${SECURITY_REPOSITORY} ${RELEASE}-security ${SETS}" \
+            >> /mnt/etc/apt/sources.list
+    fi
+}
+
+###########################################################################
+# 
+###########################################################################
+do_bind_mounts()
+{
+    #
+    # Bind mounts in preparation for chroot.
+    #
+    newtry
+    try mount --rbind /dev /mnt/dev
+    try mount --rbind /proc /mnt/proc
+    try mount --rbind /sys /mnt/sys
+    catch "bind mount failed"
+}
+
+###########################################################################
+#  Copy ourselves into the chroot, and execute appropriately.
+###########################################################################
+do_prep_and_run_chroot()
+{
+    cp /etc/resolv.conf /mnt/etc/resolv.conf
+    cp ${0} /mnt/root/chrooted.sh
+    chmod 0755 /mnt/root/chrooted.sh
+    chroot /mnt /root/chrooted.sh chroot
+    rm /mnt/root/chrooted.sh
+}
+
+###########################################################################
+# Install EFI boot entries.
+###########################################################################
+do_efibootmgr()
+{
+    if [ ${UEFI} -eq 1 ]; then
+        if [ ${UEFIGRUB} -eq 1 ]; then
+            # XXX Partition might be wrong. Figure it out dynamically?
+            if [ ${MIRROR} -eq 1 ]; then
+                efibootmgr -c -d ${DB} -p 2 -L debian1 \
+                    -l '\EFI\debian\shimx64.efi'
+            fi
+            efibootmgr -c -d ${DA} -p 2 -L debian0 \
+                -l '\EFI\debian\shimx64.efi'
+
+        else
+            # XXX handle stub loader
+        fi
+    else
+    fi
+}
+
+###########################################################################
+# Run things from inside the chroot.
+###########################################################################
+do_chrooted()
+{
+    export TERM=linux
+
+    #
+    # Free software is about choice!
+    #
+    mkdir -p /mnt/etc/apt/preferences.d
+    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
+Package: systemd
+Pin: release *
+Pin-Priority: -1
+
+Package: systemd-sysv
+Pin: release *
+Pin-Priority: -1
+
+Package: libnss-systemd
+Pin: release *
+Pin-Priority: -1
+END
+
+    cat > /etc/apt/apt.conf.d/02proxy <<END
+Acquire::http::Proxy "${CACHE}";
+END
+
+    apt update
+
+    apt-cache dumpavail | perl -00 -ne '/^Package: (.*)/m && print "$1\n"
+        if (/^Priority: (?:required|important|standard)/m
+            and ! /^Package: .*systemd/m)' | xargs apt --yes install
+
+    apt install --yes firmware-linux-nonfree
+    apt install --yes curl bsd-mailx locales man
+    apt install --yes vim-nox net-tools ifupdown bash-completion patch
+
+    locale-gen en_US.UTF-8
+    dpkg-reconfigure locales
+    dpkg-reconfigure tzdata
+
+    tasksel --task-packages standard | xargs apt install --yes
+    if [ "${LAPTOP}" -eq 1 ]; then
+        tasksel --task-packages laptop | xargs apt install --yes
+        apt install --yes pm-utils
+    fi
+
+    # XXX install from outside - all of this stuff that doesn't require
+    # user interaction
+    apt install --yes mdadm openssh-server rsync console-setup-linux
+    apt install --yes cryptsetup-initramfs
+
+    if [ ${UEFI} -eq 1 ]; then
+        apt install --yes efibootmgr
+    fi
+
+    apt install --yes bliss-zfs
+    update-rc.d zfs-import defaults
+    update-rc.d zfs-mount defaults
+    update-rc.d zfs-zed defaults
+    update-rc.d zfs-import enable
+    update-rc.d zfs-mount enable
+    update-rc.d zfs-zed enable
+
+    echo "/dev/mapper/swap none swap sw 0 0" >> /etc/fstab
+    #mkswap -f /dev/mapper/swap
+
+    mdadm --detail --scan > /etc/mdadm/mdadm.conf
+    ln -s /proc/mounts /etc/mtab
+    echo "Setting password for root account:"
+    passwd root
+
+    zpool set bootfs=${POOL}/ROOT/default ${POOL}
+
+    echo "RESUME=none" >> /etc/initramfs-tools/initramfs.conf
+    update-initramfs -c -k all
+
+    if [ ${UEFI} -eq 1 ]; then
+        if [ ${UEFIGRUB} -eq 1 ]; then
+            apt install grub-efi-amd64
+            dpkg-reconfigure grub-efi-amd64
+            grub-install --no-nvram --efi-directory=/boot/${EFI0}
+            if [ ${MIRROR} -eq 1 ]; then
+                grub-install --no-nvram --efi-directory=/boot/${EFI1}
+            fi
+        fi
+    else
+        apt install --yes grub-pc
+        grub-install ${DA}
+        if [ ${MIRROR} -eq 1 ]; then
+            grub-install ${DB}
+        fi
+    fi
+
+    update-grub
+
+    adduser --add_extra_groups ${USER}
+    chown -R ${USER}:${USER} ~${USER}
+}
+
+main $1
