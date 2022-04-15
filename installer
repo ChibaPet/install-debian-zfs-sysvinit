@@ -401,7 +401,11 @@ do_zfs()
 
     newtry
     try mkdir /mnt/boot
-    try mount ${DM0} /mnt/boot
+    if [ $MIRROR -eq 1 ]; then
+        try mount ${DM0} /mnt/boot
+    else
+        try mount /dev/disk/by-partlabel/${BOOT0} /mnt/boot
+    fi
     catch "Couldn't mount /boot"
 
     if [ ${UEFI} -eq 1 ]; then
