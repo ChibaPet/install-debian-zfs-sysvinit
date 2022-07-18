@@ -1,0 +1,7 @@
+Package: bliss-zfs
+Maintainer: Mason Loring Bliss <mason@blisses.org>
+Version: 2022071000
+Architecture: all
+Depends: bliss-zfs-5.10.0-15, bliss-zfs-5.10.0-16
+Conflicts: linux-image-amd64 (>> 5.10.127-1)
+Description: Blisses ZFS packaging
