@@ -11,11 +11,7 @@ Parts of this have doubtless bitrotted - I don't use native encryption
 much, for instance. Worked last time I tried it.
 
 This used to support Devuan and Ubuntu installs as well, and can trivially
-support those with some minor modifications. I'm going to do a Void version
-at some point.
-
-Needs more documentation. Probably loaded with bugs. Works for me most of
-the time.
+support those with some minor modifications.
 
 *** This will destroy your disk. By design. Don't use it. ***
 
@@ -33,12 +29,13 @@ packages. I follow this guide:
 I use a metapackage that depends on the most recent two ZFS kmod packages
 I've created and that conflicts with anything newer than a kernel for which
 I've already built ZFS. Each kmod package is specific to a kernel, and
-depends on the ZFS userland packages and the requisite kernel bits. I'll
-publish examples sometime. It's possible you can use DKMS instead, but I
-wouldn't want to.
+depends on the ZFS userland packages and the requisite kernel bits. An
+example umbrella metapackage and an example single-kernel kmod metapackage
+are included in this repository.
 
-Oh, FWIW, this is intended to run off from the Debian standard live media.
-It's historically also run from Ubuntu live images. It can cross-install.
+This is intended to run off from the Debian standard live media. It's
+historically also run from Ubuntu live images. It might run from Hrmph. It
+can cross-install.
 
 Note that my funny try/catch trick is generally useful and I need to use it
 everywhere. Note also that I need to make this way more granular, with each
