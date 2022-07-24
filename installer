@@ -208,14 +208,7 @@ END
     update-rc.d zfs-mount enable
     update-rc.d zfs-zed enable
 
-    # XXX encrypt
-    if [ ${MIRROR} -eq 1 ]; then
-        echo "/dev/mapper/swap none swap sw 0 0" >> /etc/fstab
-        mkswap -f /dev/mapper/swap
-    else
-        echo "/dev/disk/by-partlabel/swap0 none swap sw 0 0" >> /etc/fstab
-        mkswap -f /dev/disk/by-partlabel/swap0
-    fi
+    echo "/dev/mapper/swap none swap sw 0 0" >> /etc/fstab
 
     mdadm --detail --scan > /etc/mdadm/mdadm.conf
     ln -s /proc/mounts /etc/mtab
