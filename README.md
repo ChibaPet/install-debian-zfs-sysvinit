@@ -7,6 +7,10 @@ Install Debian on ZFS, with sysvinit, optionally encrypted. You can
 optionally use legacy mountpoints and manage mounts with fstab, and that's
 Just Fine.
 
+20220810: Added installer-vm, a cut-down version fit for VMs that uses LVM
+instead of ZFS and doesn't use encryption or mirroring at all, the notion
+being that you're inheriting these from the hypervisor.
+
 Parts of this have doubtless bitrotted - I don't use native encryption
 much, for instance. Worked last time I tried it.
 
