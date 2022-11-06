@@ -50,7 +50,7 @@ SECURITY_REPOSITORY="http://security.debian.org/debian-security"
 
 # Repository with ZFS packaging.
 ZFS_REPOSITORY="http://repo.${DOMAIN}/debian"
-ZFS_REPOSITORY_SETS="main"
+ZFS_REPOSITORY_SETS="main openzfs2.1"
 ZFS_REPOSITORY_KEY="http://repo.${DOMAIN}/${DOMAIN}.asc"
 ZFS_METAPACKAGE="bliss-zfs"
 
@@ -273,7 +273,8 @@ END
     try apt install --yes debootstrap rsync mdadm parted
     # A metapackage that requires multiple kernels isn't appropriate for an
     # install environment.
-    try apt install --yes kmod-zfs-$(uname -r) zfs libuutil3 libzfs4 libnvpair3
+    KERN=$(uname -r | sed -e 's/-amd64//')
+    try apt install --yes zfs bliss-zfs-${KERN} kmod-zfs-${KERN}-amd64
     if [ ${UEFI} -eq 1 ]; then
         try apt install --yes efibootmgr dosfstools
     fi
@@ -587,7 +588,7 @@ if [ ${NATIVECRYPT} -eq 0 ]; then
                 | awk '{print $2}' | sed -e 's/"//g')
 
             echo -n "luks${ROOT0} ${uuid0} " > /mnt/etc/crypttab
-            echo "none luks,initramfs" > /mnt/etc/crypttab
+            echo "none luks,initramfs" >> /mnt/etc/crypttab
 
             echo -n "luks${ROOT1} ${uuid1} " >> /mnt/etc/crypttab
             echo "none luks,initramfs" >> /mnt/etc/crypttab
