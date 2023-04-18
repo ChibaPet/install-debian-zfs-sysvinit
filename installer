@@ -35,6 +35,7 @@ UEFIGRUB=1          # Use GRUB with UEFI? If not, put kernel and initrd in ESP.
 SWAPSIZE=8192       # Size of swap in megabytes
 MIRROR=1            # Are we installing to a RAID or mirror?
 NATIVECRYPT=0       # Are we using native encryption? If not, we assume LUKS.
+LUKSOPT="--pbkdf argon2id"
 
 # Block devices - DB and DM values unused if you're not mirroring.
 DA=/dev/nvme0n1     # First drive.
@@ -376,10 +377,10 @@ fi
 if [ ${NATIVECRYPT} -eq 0 ]; then
     if confirm_step "format and open LUKS root"; then
         newtry
-        try cryptsetup luksFormat /dev/disk/by-partlabel/${ROOT0}
+        try cryptsetup luksFormat ${LUKSOPT} /dev/disk/by-partlabel/${ROOT0}
         try cryptsetup luksOpen /dev/disk/by-partlabel/${ROOT0} luks${ROOT0}
         if [ ${MIRROR} -eq 1 ]; then
-            try cryptsetup luksFormat /dev/disk/by-partlabel/${ROOT1}
+            try cryptsetup luksFormat ${LUKSOPT} /dev/disk/by-partlabel/${ROOT1}
             try cryptsetup luksOpen /dev/disk/by-partlabel/${ROOT1} luks${ROOT1}
         fi
         catch "root cryptsetup failed"
