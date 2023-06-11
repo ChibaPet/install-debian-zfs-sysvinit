@@ -1,3 +1,4 @@
+# WORK IN PROGRESS FOR BOOKWORM
 # install-debian-zfs-sysvinit
 
 Buggy. Do not use unless you're feeling adventurous and like supporting
