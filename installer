@@ -188,6 +188,48 @@ Pin: release *
 Pin-Priority: -1
 END
 
+    cat <<END > /mnt/etc/apt/preferences.d/bliss-zfs
+Package: libnvpair3
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: libuutil3
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: libzfs5
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: libzfs5-devel
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: libzpool5
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: python3-pyzfs
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: zfs
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: zfs-dracut
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: zfs-initramfs
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+
+Package: zfs-test
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+END
+
     cat > /etc/apt/apt.conf.d/02proxy <<END
 Acquire::http::Proxy "${CACHE}";
 END
