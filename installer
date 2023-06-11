@@ -188,6 +188,8 @@ Pin: release *
 Pin-Priority: -1
 END
 
+    # XXX this should also be in the install environment, or Debian will
+    # conflict with the local packages.
     cat <<END > /mnt/etc/apt/preferences.d/bliss-zfs
 Package: libnvpair3
 Pin: origin repo.${DOMAIN}
