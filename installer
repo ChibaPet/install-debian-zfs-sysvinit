@@ -53,7 +53,7 @@ SECURITY_REPOSITORY="http://security.debian.org/debian-security"
 ZFS_REPOSITORY="http://repo.${DOMAIN}/debian"
 ZFS_REPOSITORY_SETS="main openzfs2.1"
 ZFS_REPOSITORY_KEY="http://repo.${DOMAIN}/${DOMAIN}.asc"
-ZFS_METAPACKAGE="bliss-zfs"
+ZFS_METAPACKAGE="bliss-zfs-11-2.1"
 
 # Local cache.
 CACHE="http://cache.${DOMAIN}:3142"
@@ -127,6 +127,34 @@ catch()
     fi
 }
 
+set_apt_prefs()
+{
+    mkdir -p /etc/apt/preferences.d
+    cat <<END > /etc/apt/preferences.d/no-systemd
+Package:
+    avahi-daemon:any
+    src:usrmerge:any
+    systemd:any
+    systemd-sysv:any
+    libnss-systemd:any
+Pin: release *
+Pin-Priority: -1
+END
+
+    cat <<END > /etc/apt/preferences.d/bliss-zfs
+Package:
+    libnvpair3:any libuutil3:any libzfs5:any libzfs5-devel:any
+    libzpool5:any python3-pyzfs:any python3-pyzfs:any zfs:any
+    zfs-dracut:any zfs-initramfs:any zfs-test:any
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+END
+
+    cat > /etc/apt/apt.conf.d/02proxy <<END
+Acquire::http::Proxy "${CACHE}";
+END
+}
+
 # NVME partition separators
 echo $DA | grep -q nvme
 if [ $? -eq 0 ]; then
@@ -150,27 +178,7 @@ STEP=0
 if [ "X${1}" = "Xchroot" ]; then
     export TERM=linux
 
-    #
-    # Free software is about choice!
-    #
-    mkdir -p /mnt/etc/apt/preferences.d
-    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
-Package: systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd-sysv
-Pin: release *
-Pin-Priority: -1
-
-Package: libnss-systemd
-Pin: release *
-Pin-Priority: -1
-END
-
-    cat > /etc/apt/apt.conf.d/02proxy <<END
-Acquire::http::Proxy "${CACHE}";
-END
+    set_apt_prefs
 
     apt update
 
@@ -249,9 +257,8 @@ fi
 ###########################################################################
 if confirm_step "install prerequisites"; then
     newtry
-    echo > /etc/apt/apt.conf.d/02proxy <<END
-Acquire::http::Proxy "${CACHE}";
-END
+
+    set_apt_prefs
 
     echo "deb ${ZFS_REPOSITORY} ${RELEASE} ${ZFS_REPOSITORY_SETS}" \
       > /etc/apt/sources.list.d/local-zfs.list
@@ -480,7 +487,7 @@ fi
 ###########################################################################
 if confirm_step "mount boot and ESP(s) into /mnt"; then
     newtry
-    try mkdir /mnt/boot
+    try mkdir -p /mnt/boot
     if [ $MIRROR -eq 1 ]; then
         try mount ${DM0} /mnt/boot
     else
@@ -490,10 +497,10 @@ if confirm_step "mount boot and ESP(s) into /mnt"; then
 
     if [ ${UEFI} -eq 1 ]; then
         newtry
-        try mkdir /mnt/boot/${EFI0}
+        try mkdir -p /mnt/boot/${EFI0}
         try mount /dev/disk/by-partlabel/${EFI0} /mnt/boot/${EFI0}
         if [ ${MIRROR} -eq 1 ]; then
-            try mkdir /mnt/boot/${EFI1}
+            try mkdir -p /mnt/boot/${EFI1}
             try mount /dev/disk/by-partlabel/${EFI1} /mnt/boot/${EFI1}
         fi
         catch "Couldn't mount the ESP(s)"
@@ -503,26 +510,6 @@ fi
 
 ###########################################################################
 if confirm_step "run debootstrap"; then
-    # Free software is about choice!
-    mkdir -p /mnt/etc/apt/preferences.d
-    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
-Package: systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd:i386
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd-sysv
-Pin: release *
-Pin-Priority: -1
-
-Package: libnss-systemd
-Pin: release *
-Pin-Priority: -1
-END
-
     newtry
     try debootstrap --no-merged-usr --arch=amd64 \
         --include=sysvinit-core --variant=minbase \
