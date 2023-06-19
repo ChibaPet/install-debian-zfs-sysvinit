@@ -484,7 +484,7 @@ fi
 ###########################################################################
 if confirm_step "mount boot and ESP(s) into /mnt"; then
     newtry
-    try mkdir /mnt/boot
+    try mkdir -p /mnt/boot
     if [ $MIRROR -eq 1 ]; then
         try mount ${DM0} /mnt/boot
     else
@@ -494,10 +494,10 @@ if confirm_step "mount boot and ESP(s) into /mnt"; then
 
     if [ ${UEFI} -eq 1 ]; then
         newtry
-        try mkdir /mnt/boot/${EFI0}
+        try mkdir -p /mnt/boot/${EFI0}
         try mount /dev/disk/by-partlabel/${EFI0} /mnt/boot/${EFI0}
         if [ ${MIRROR} -eq 1 ]; then
-            try mkdir /mnt/boot/${EFI1}
+            try mkdir -p /mnt/boot/${EFI1}
             try mount /dev/disk/by-partlabel/${EFI1} /mnt/boot/${EFI1}
         fi
         catch "Couldn't mount the ESP(s)"
