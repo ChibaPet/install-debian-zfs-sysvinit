@@ -127,6 +127,31 @@ catch()
     fi
 }
 
+set_apt_prefs()
+{
+    mkdir -p /etc/apt/preferences.d
+    cat <<END > /etc/apt/preferences.d/no-systemd
+Package:
+    avahi-daemon:any
+    src:pulseaudio:any
+    src:systemd:any
+    src:usrmerge:any
+Pin: release *
+Pin-Priority: -1
+END
+
+    cat <<END > /etc/apt/preferences.d/bliss-zfs
+Package: libnvpair3 libuutil3 libzfs5 libzfs5-devel libzpool5 python3-pyzfs
+    python3-pyzfs zfs zfs-dracut zfs-initramfs zfs-test
+Pin: origin repo.${DOMAIN}
+Pin-Priority: 1000
+END
+
+    cat > /etc/apt/apt.conf.d/02proxy <<END
+Acquire::http::Proxy "${CACHE}";
+END
+}
+
 # NVME partition separators
 echo $DA | grep -q nvme
 if [ $? -eq 0 ]; then
@@ -150,91 +175,7 @@ STEP=0
 if [ "X${1}" = "Xchroot" ]; then
     export TERM=linux
 
-    #
-    # Free software is about choice!
-    #
-    mkdir -p /mnt/etc/apt/preferences.d
-    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
-Package: systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd:i386
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd-sysv
-Pin: release *
-Pin-Priority: -1
-
-Package: libnss-systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: pulseaudio
-Pin: release *
-Pin-Priority: -1
-
-Package: avahi-daemon
-Pin: release *
-Pin-Priority: -1
-
-Package: avahi-daemon:i386
-Pin: release *
-Pin-Priority: -1
-
-Package: usrmerge
-Pin: release *
-Pin-Priority: -1
-END
-
-    # XXX this should also be in the install environment, or Debian will
-    # conflict with the local packages.
-    cat <<END > /mnt/etc/apt/preferences.d/bliss-zfs
-Package: libnvpair3
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: libuutil3
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: libzfs5
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: libzfs5-devel
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: libzpool5
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: python3-pyzfs
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: zfs
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: zfs-dracut
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: zfs-initramfs
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-
-Package: zfs-test
-Pin: origin repo.${DOMAIN}
-Pin-Priority: 1000
-END
-
-    cat > /etc/apt/apt.conf.d/02proxy <<END
-Acquire::http::Proxy "${CACHE}";
-END
+    set_apt_prefs
 
     apt update
 
@@ -313,9 +254,8 @@ fi
 ###########################################################################
 if confirm_step "install prerequisites"; then
     newtry
-    echo > /etc/apt/apt.conf.d/02proxy <<END
-Acquire::http::Proxy "${CACHE}";
-END
+
+    set_apt_prefs
 
     echo "deb ${ZFS_REPOSITORY} ${RELEASE} ${ZFS_REPOSITORY_SETS}" \
       > /etc/apt/sources.list.d/local-zfs.list
@@ -567,26 +507,6 @@ fi
 
 ###########################################################################
 if confirm_step "run debootstrap"; then
-    # Free software is about choice!
-    mkdir -p /mnt/etc/apt/preferences.d
-    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
-Package: systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd:i386
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd-sysv
-Pin: release *
-Pin-Priority: -1
-
-Package: libnss-systemd
-Pin: release *
-Pin-Priority: -1
-END
-
     newtry
     try debootstrap --no-merged-usr --arch=amd64 \
         --include=sysvinit-core --variant=minbase \
