@@ -133,16 +133,19 @@ set_apt_prefs()
     cat <<END > /etc/apt/preferences.d/no-systemd
 Package:
     avahi-daemon:any
-    src:pulseaudio:any
-    src:systemd:any
     src:usrmerge:any
+    systemd:any
+    systemd-sysv:any
+    libnss-systemd:any
 Pin: release *
 Pin-Priority: -1
 END
 
     cat <<END > /etc/apt/preferences.d/bliss-zfs
-Package: libnvpair3 libuutil3 libzfs5 libzfs5-devel libzpool5 python3-pyzfs
-    python3-pyzfs zfs zfs-dracut zfs-initramfs zfs-test
+Package:
+    libnvpair3:any libuutil3:any libzfs5:any libzfs5-devel:any
+    libzpool5:any python3-pyzfs:any python3-pyzfs:any zfs:any
+    zfs-dracut:any zfs-initramfs:any zfs-test:any
 Pin: origin repo.${DOMAIN}
 Pin-Priority: 1000
 END
