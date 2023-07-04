@@ -34,9 +34,9 @@ DA=/dev/vda         # First drive, virtio.
 #DA=/dev/sda        # First drive, scsi/sata.
 
 # Distribution-specific variables.
-RELEASE="bullseye"
+RELEASE="bookworm"
 REPOSITORY="http://deb.debian.org/debian"
-SETS="main contrib non-free"
+SETS="main contrib non-free non-free-firmware"
 SECURITY_REPOSITORY="http://security.debian.org/debian-security"
 
 # Local cache.
@@ -46,6 +46,7 @@ export http_proxy="${CACHE}";
 # GPT labels, 0 is for the first disk, 1 for the second if mirroring
 BIOSBOOT0=grub0     # biosboot
 BOOT0=boot0         # /boot
+SWAP0=swap0         # swap
 ROOT0=root0         # main vg
 
 
@@ -106,26 +107,16 @@ catch()
 
 STEP=0
 
-###########################################################################
-# If we're invoked as the thing inside the chroot...
-# XXX maybe break this into steps as well
-if [ "X${1}" = "Xchroot" ]; then
-    export TERM=linux
-
-    #
-    # Free software is about choice!
-    #
-    mkdir -p /mnt/etc/apt/preferences.d
-    cat <<END > /mnt/etc/apt/preferences.d/no-systemd
-Package: systemd
-Pin: release *
-Pin-Priority: -1
-
-Package: systemd-sysv
-Pin: release *
-Pin-Priority: -1
-
-Package: libnss-systemd
+set_apt_prefs()
+{
+    mkdir -p /etc/apt/preferences.d
+    cat <<END > /etc/apt/preferences.d/no-systemd
+Package:
+    avahi-daemon:any
+    src:usrmerge:any
+    systemd:any
+    systemd-sysv:any
+    libnss-systemd:any
 Pin: release *
 Pin-Priority: -1
 END
@@ -133,6 +124,16 @@ END
     cat > /etc/apt/apt.conf.d/02proxy <<END
 Acquire::http::Proxy "${CACHE}";
 END
+}
+
+
+###########################################################################
+# If we're invoked as the thing inside the chroot...
+# XXX maybe break this into steps as well
+if [ "X${1}" = "Xchroot" ]; then
+    export TERM=linux
+
+    set_apt_prefs
 
     apt update
 
@@ -142,7 +143,7 @@ END
         if (/^Priority: (?:required|important|standard)/m
             and ! /^Package: .*systemd/m)' | xargs apt --yes install
 
-    apt install --yes firmware-linux-nonfree
+    apt install --yes firmware-linux-nonfree initramfs-tools acpid
     apt install --yes curl bsd-mailx locales man
     apt install --yes vim-nox net-tools ifupdown bash-completion patch
 
@@ -178,9 +179,8 @@ fi
 ###########################################################################
 if confirm_step "install prerequisites"; then
     newtry
-    echo > /etc/apt/apt.conf.d/02proxy <<END
-Acquire::http::Proxy "${CACHE}";
-END
+
+    set_apt_prefs
 
     # Flesh out the install environment repositories - kernel n-1 can
     # be found here sometimes, example being linux-image-5.10.0-15-amd64
@@ -208,15 +208,13 @@ if confirm_step "clear disk(s) and create partitions"; then
     sgdisk -n 1:$(sgdisk -F ${DA}):+128K -t 1:ef02 ${DA}
     # /boot
     sgdisk -n 2:$(sgdisk -F ${DA}):+512M -t 2:8300 ${DA}
+    # /swap
+    sgdisk -n 3:$(sgdisk -F ${DA}):+${SWAPSIZE}M -t 3:8200 ${DA}
     # root
-    sgdisk -n 3:$(sgdisk -F ${DA}):0 -t 3:8300 ${DA}
+    sgdisk -n 4:$(sgdisk -F ${DA}):0 -t 4:8300 ${DA}
 
-    sgdisk --change-name=2:${BOOT0} --change-name=3:${ROOT0} ${DA}
-
-    pvcreate /dev/disk/by-partlabel/${ROOT0}
-    vgcreate rootvg /dev/disk/by-partlabel/${ROOT0}
-    lvcreate -L ${SWAPSIZE}m -n swap rootvg
-    lvcreate -l 100%FREE -n root rootvg
+    sgdisk --change-name=2:${BOOT0} --change-name=3:${SWAP0} \
+        --change-name=4:${ROOT0} ${DA}
 fi
 
 
@@ -233,14 +231,14 @@ if confirm_step "format /boot, swap, and root"; then
     # Format swap partition.
     #
     newtry
-    try mkswap /dev/rootvg/swap
+    try mkswap /dev/disk/by-partlabel/${SWAP0}
     catch "swap format failed"
 
     #
     # Format root partition.
     #
     newtry
-    try mkfs.ext4 /dev/rootvg/root
+    try mkfs.ext4 /dev/disk/by-partlabel/${ROOT0}
     catch "root format failed"
 fi
 
@@ -248,7 +246,7 @@ fi
 ###########################################################################
 if confirm_step "mount datasets into /mnt"; then
     newtry
-    try mount /dev/rootvg/root /mnt
+    try mount /dev/disk/by-partlabel/${ROOT0} /mnt
     catch mount root failed
 
     newtry
@@ -288,7 +286,7 @@ END
 
     newtry
     try debootstrap --no-merged-usr --arch=amd64 \
-        --include=sysvinit-core,libelogind0,lvm2 --variant=minbase \
+        --include=sysvinit-core,libelogind0 --variant=minbase \
         --exclude=systemd,systemd-sysv,libnss-systemd ${RELEASE} /mnt
     catch "debootstrap failed"
 fi
@@ -297,9 +295,9 @@ fi
 ###########################################################################
 if confirm_step "populate /mnt/etc/fstab"; then
     cat <<END > /mnt/etc/fstab
-/dev/rootvg/root / ext4 defaults 0 0
-/dev/disk/by-partlabel/boot0 /boot ext4 defaults 0 0
-/dev/rootvg/swap none swap sw 0 0
+/dev/disk/by-partlabel/${ROOT0} / ext4 defaults 0 0
+/dev/disk/by-partlabel/${BOOT0} /boot ext4 defaults 0 0
+/dev/disk/by-partlabel/${SWAP0} none swap sw 0 0
 END
 fi
 
@@ -356,3 +354,4 @@ fi
 ###########################################################################
 echo
 echo "We've gotten to the end! Enjoy!"
+echo "Don't forget network set-up."
