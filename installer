@@ -363,9 +363,9 @@ if confirm_step "format ESP, /boot, and swap"; then
     if [ $MIRROR -eq 1 ]; then
         try mdadm --create -n 2 -l 1 ${DM0} /dev/disk/by-partlabel/${BOOT0} \
             /dev/disk/by-partlabel/${BOOT1}
-        try mkfs.ext4 ${DM0}
+        try mkfs.ext4 -I 256 ${DM0}
     else
-        try mkfs.ext4 /dev/disk/by-partlabel/${BOOT0}
+        try mkfs.ext4 -I 256 /dev/disk/by-partlabel/${BOOT0}
     fi
     catch "boot set-up failed"
 
