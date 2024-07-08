@@ -184,7 +184,8 @@ if [ "X${1}" = "Xchroot" ]; then
 
     apt-cache dumpavail | perl -00 -ne '/^Package: (.*)/m && print "$1\n"
         if (/^Priority: (?:required|important|standard)/m
-            and ! /^Package: .*systemd/m)' | xargs apt --yes install
+            and ! /^Package: .*systemd/m)' \
+                | xargs apt --yes --allow-downgrades install
 
     apt install --yes firmware-linux-nonfree
     apt install --yes curl bsd-mailx locales man
