@@ -53,7 +53,7 @@ SECURITY_REPOSITORY="http://security.debian.org/debian-security"
 ZFS_REPOSITORY="http://repo.${DOMAIN}/debian"
 ZFS_REPOSITORY_SETS="main openzfs2.1"
 ZFS_REPOSITORY_KEY="http://repo.${DOMAIN}/${DOMAIN}.asc"
-ZFS_METAPACKAGE="bliss-zfs-11-2.1"
+ZFS_METAPACKAGE="bliss-zfs-12-2.1"
 
 # Local cache.
 CACHE="http://cache.${DOMAIN}:3142"
