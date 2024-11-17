@@ -44,9 +44,9 @@ DM0=/dev/md0        # Mirror for /boot if we're using two disks.
 DM1=/dev/md1        # Mirror for swap if we're using two disks.
 
 # Distribution-specific variables.
-RELEASE="bullseye"
+RELEASE="bookworm"
 REPOSITORY="http://deb.debian.org/debian"
-SETS="main contrib non-free"
+SETS="main contrib non-free  non-free-firmware"
 SECURITY_REPOSITORY="http://security.debian.org/debian-security"
 
 # Repository with ZFS packaging.
