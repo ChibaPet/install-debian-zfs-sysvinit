@@ -398,14 +398,16 @@ if confirm_step "create root zpool"; then
         fi
         try zpool create -o ashift=12 -O canmount=off -O compression=lz4 \
             -O xattr=sa -O acltype=posixacl -O encryption=on \
-            -O keyformat=passphrase -R /mnt ${POOL} ${target}
+            -O keyformat=passphrase -o compatibility=openzfs-2.2 \
+            -R /mnt ${POOL} ${target}
     else
         target="/dev/mapper/luks${ROOT0}"
         if [ ${MIRROR} -eq 1 ]; then
             target="mirror ${target} /dev/mapper/luks${ROOT1}"
         fi
         try zpool create -o ashift=12 -O canmount=off -O compression=lz4 \
-            -O xattr=sa -O acltype=posixacl -R /mnt ${POOL} ${target}
+            -O xattr=sa -O acltype=posixacl -o compatibility=openzfs-2.2 \
+            -R /mnt ${POOL} ${target}
     fi
     catch "zpool create failed"
 fi
