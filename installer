@@ -180,6 +180,7 @@ if [ "X${1}" = "Xchroot" ]; then
     apt install --yes firmware-linux-nonfree
     apt install --yes curl bsd-mailx locales man
     apt install --yes vim-nox net-tools ifupdown bash-completion patch
+    apt install --yes orphan-sysvinit-scripts rsyslog ntpsec
 
     locale-gen en_US.UTF-8
     dpkg-reconfigure locales
